@@ -1,5 +1,5 @@
 // Copyright (c) 2019 Tim Cullen
-// All Rights Reserved
+// See LICENSE file
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -191,8 +191,8 @@ static mutex g_stats_mutex;
 // prototypes
 static pid_t tcperf_gettid( void );
 
-void read_handler( boost::system::error_code ec,size_t bytes_done,
-                   opctx_t& opctx )
+static void read_handler( boost::system::error_code ec,size_t bytes_done,
+                          opctx_t& opctx )
 {
     static bool first_time = true;
     bool fake_success = false;
@@ -242,7 +242,8 @@ retry:
     }
 }
 
-void tcp_accept_handler( boost::system::error_code ec,tcp::socket tcp_skt,io_generator *io_gen )
+static void tcp_accept_handler( boost::system::error_code ec,tcp::socket tcp_skt,
+                                io_generator *io_gen )
 {
     opctx_t opctx;
 
@@ -276,7 +277,7 @@ void io_generator::start_io( void )
     switch( m_cfg.ptype ) {
         case PROTO_TCP:
             {
-                tcp::endpoint ep( make_address_v4( m_cfg.destip ),m_cfg.port );
+                tcp::endpoint ep( make_address_v4( m_cfg.destip ),m_cfg.port + m_cfg.core_id );
                 boost::asio::socket_base::reuse_address opt( true );
                 m_tsa.open( ep.protocol() );
                 m_tsa.set_option( opt );
@@ -304,7 +305,7 @@ void io_generator::wait( void )
         m_ioctx.restart();
     }
 
-    stats.end_time = steady_clock::now();
+    //stats.end_time = steady_clock::now();
     m_ioctx.stop();
 }
 
@@ -347,11 +348,15 @@ io_generator::io_generator( thrd_cfg_t cfg )
 
 io_generator::~io_generator()
 {
+    stats.end_time = steady_clock::now();
+
     switch( m_cfg.ptype ) {
         case PROTO_TCP:
+            u.tcp_skt->shutdown( tcp::socket::shutdown_both );
             delete u.tcp_skt;
             break;
         case PROTO_UDP:
+            u.udp_skt->shutdown( udp::socket::shutdown_both );
             delete u.udp_skt;
             break;
         default:
@@ -359,6 +364,9 @@ io_generator::~io_generator()
     }
 
     delete [] m_buffer;
+
+    lock_guard<mutex> stats_lock( g_stats_mutex );
+    stats_list.push_back( get_stats() );
 }
 
 // believe it or not glibc provides no wrapper for the 'get thread id' system
@@ -385,9 +393,6 @@ static void start_io_generator( thrd_cfg_t cfg )
         io_generator io_gen( cfg );
         io_gen.start_io();
         io_gen.wait();
-
-        lock_guard<mutex> stats_lock( g_stats_mutex );
-        stats_list.push_back( io_gen.get_stats() );
     }
     catch( boost::system::system_error& e ) {
         cout << e.what() << " - Thread Terminating" << endl;

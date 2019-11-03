@@ -1,5 +1,5 @@
 // Copyright (c) 2019 Tim Cullen
-// All Rights Reserved
+// See LICENSE file
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -283,7 +283,7 @@ io_generator::io_generator( thrd_cfg_t cfg )
                 // create a socket and connect to the target
                 tcp::socket *tcp_skt = new tcp::socket( m_ioctx );
                 u.tcp_skt = tcp_skt;
-                tcp::endpoint ep( address::from_string( cfg.destip ),cfg.port );
+                tcp::endpoint ep( address::from_string( cfg.destip ),cfg.port + cfg.core_id );
                 tcp_skt->connect( ep );
             }
             break;
