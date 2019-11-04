@@ -46,7 +46,9 @@ static const uint32_t ONE_KILOBIT      = 1024 * 8;
 typedef enum {
     PROTO_UNSUPPORTED,
     PROTO_TCP,
+    PROTO_TCPv6,
     PROTO_UDP,
+    PROTO_UDPv6,
     PROTO_SCTP,
     PROTO_RDP,
     PROTO_MULTICAST,
@@ -106,9 +108,10 @@ class io_generator {
     // stats info
     iostats_t stats;
 
-    // socket on which io will be generated
+    // socket(s) on which io will be generated
+    list<tcp::socket *> tsl;
+
     union {
-        tcp::socket *tcp_skt;
         udp::socket *udp_skt;
     } u;
 
@@ -143,8 +146,7 @@ public:
     int get_core_id( void )       { return m_cfg.core_id; }
 
     // socket accessors
-    void set_tcp_socket( tcp::socket *ts ) { u.tcp_skt = ts; }
-    tcp::socket *get_tcp_socket( void )    { return u.tcp_skt; }
+    void set_tcp_socket( tcp::socket *ts ) { tsl.push_back( ts ); }
 
     void set_udp_socket( udp::socket *us ) { u.udp_skt = us; }
     udp::socket *get_udp_socket( void )    { return u.udp_skt; }
@@ -320,8 +322,6 @@ io_generator::io_generator( thrd_cfg_t cfg )
     // initialize stats
     memset( &stats,0,sizeof( stats ) );
 
-    u.tcp_skt = NULL;
-
     // pre-allocate io buffers
     m_buffer = new uint8_t[cfg.n_elems * cfg.elem_size];
     for( int i : boost::irange( 0,cfg.n_elems ) ) {
@@ -352,8 +352,8 @@ io_generator::~io_generator()
 
     switch( m_cfg.ptype ) {
         case PROTO_TCP:
-            u.tcp_skt->shutdown( tcp::socket::shutdown_both );
-            delete u.tcp_skt;
+            for( auto&& ts : tsl ) { ts->shutdown( tcp::socket::shutdown_both );
+                                     delete ts; }
             break;
         case PROTO_UDP:
             u.udp_skt->shutdown( udp::socket::shutdown_both );

@@ -46,7 +46,9 @@ static const uint32_t ONE_KILOBIT      = 1024 * 8;
 typedef enum {
     PROTO_UNSUPPORTED,
     PROTO_TCP,
+    PROTO_TCPv6,
     PROTO_UDP,
+    PROTO_UDPv6,
     PROTO_SCTP,
     PROTO_RDP,
     PROTO_MULTICAST,
@@ -71,10 +73,13 @@ struct thrd_cfg {
     string destip;
     int port;
 
+    // time in seconds for test run
+    int time;
+
     thrd_cfg()
         : ptype( PROTO_UNSUPPORTED ),core_id( -1 ),port( 0 ),
           n_elems( IO_GEN_NUM_ELEMS ),elem_size( IO_GEN_ELEM_SIZE ),
-          max_in_flight( 0 ) {}
+          max_in_flight( 0 ),time( 60 ) {}
 };
 typedef struct thrd_cfg thrd_cfg_t;
 
@@ -174,6 +179,58 @@ static mutex g_stats_mutex;
 // prototypes
 static pid_t tcperf_gettid( void );
 
+static void write_handler( boost::system::error_code ec,size_t bytes_done,
+                           opctx_t& opctx )
+{
+    static bool first_time = true;
+    bool fake_success = false;
+
+    if( first_time ) {
+        opctx.io_gen->set_start_time();
+        first_time = false;
+    }
+
+    if( !ec ) {
+retry:
+        if( continue_running ) {
+            if( !fake_success )
+                opctx.retries = IO_GEN_RETRY_COUNT;
+
+            switch( opctx.ptype ) {
+                case PROTO_TCP:
+                    boost::asio::async_read( *opctx.u.tcp_skt,opctx.buf,
+                        boost::bind( write_handler,_1,_2,opctx ) );
+                    break;
+                case PROTO_UDP:
+                    opctx.u.udp_skt->async_receive( opctx.buf,
+                        boost::bind( write_handler,_1,_2,opctx ) );
+                    break;
+                default:
+                    throw runtime_error( "operation context is corrupt" );
+                    break;
+            }
+
+            // accounting
+            // Shakespeare said "First thing we do is shoot all the accountants"
+            opctx.io_gen->add_total_bytes( bytes_done );
+            opctx.io_gen->add_inc_nreqs();
+        }
+    }
+    else {
+        if( boost::system::errc::connection_refused == ec ) {
+            if( --opctx.retries > 0 ) {
+                fake_success = true;
+                goto retry;
+            }
+            else
+                throw runtime_error( "operation retry count exceeded" );
+        }
+        else
+            throw boost::system::system_error( ec );
+    }
+}
+
+#if 0
 void write_handler( boost::system::error_code ec,size_t bytes_done,
                     opctx_t& opctx )
 {
@@ -220,6 +277,7 @@ void write_handler( boost::system::error_code ec,size_t bytes_done,
         }
     }
 }
+#endif
 
 void io_generator::start_io( void )
 {
@@ -472,7 +530,8 @@ int main( int argc,char **argv )
             ( "destip",value<string>(),"Specify Target IP address (Required)" )
             ( "port",value<int>(),"Specify Target Port Number (Required)" )
             ( "nthreads",value<int>(),"Number of OS Level Threads to Start" )
-            ( "max_in_flight",value<int>(),"Max IO Requests per Thread" );
+            ( "max_in_flight",value<int>(),"Max IO Requests per Thread" )
+            ( "time",value<int>(),"Time in Seconds for Test Run" );
         store( parse_command_line( argc,argv,desc ),vm );
         notify( vm );
 
@@ -498,6 +557,9 @@ int main( int argc,char **argv )
             cfg.max_in_flight = IO_GEN_MAX_IN_FLIGHT;
             if( vm.count( "max_in_flight" ) )
                 cfg.max_in_flight = vm["max_in_flight"].as<int>();
+
+            if( vm.count( "time" ) )
+                cfg.time = vm["time"].as<int>();
 
             proto_map_t::iterator it;
             if( (it = proto_map.find( proto )) != proto_map.end() ) {
