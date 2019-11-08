@@ -136,6 +136,7 @@ public:
     void add_total_bytes( uint64_t bytes ) { stats.total_bytes += bytes; }
     void add_inc_nreqs( void ) { stats.n_reqs++; }
     void add_inc_retried_reqs( void ) { stats.n_retried_reqs++; }
+    void set_start_time( void ) { stats.start_time = steady_clock::now(); }
 
     // ctor / dtor
     io_generator( thrd_cfg_t );
