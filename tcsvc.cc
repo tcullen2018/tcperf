@@ -22,6 +22,7 @@ using namespace boost::asio::ip;
 
 // globals
 static boost::asio::io_context io_ctx;
+static list<thread> thrd_list;
 
 static void io_op_handler( boost::system::error_code ec,size_t bytes_done,
                            tcsvc_op& tcop )
@@ -140,7 +141,6 @@ static void start_io_handler( int core_id )
 
 int tcsvc_init( int nthreads )
 {
-    list<thread> tl;
     function<void( int )> func = []( int core_id )
         { start_io_handler( core_id ); };
 
@@ -148,11 +148,11 @@ int tcsvc_init( int nthreads )
         nthreads = thread::hardware_concurrency();
 
     for( int i : boost::irange( 0,nthreads ) ) 
-        tl.emplace( tl.begin(),thread( func,i ) );
+        thrd_list.emplace( thrd_list.begin(),thread( func,i ) );
 }
 
 void tcsvc_term()
 {
     io_ctx.stop();
-    for( auto&& t : tl ) t.join();
+    for( auto&& t : thrd_list ) t.join();
 }
