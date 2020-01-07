@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <iostream>
 #include <vector>
+#include <forward_list>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
@@ -29,6 +30,9 @@ class tcperf_thread {
         void operator()( io_context& ioctx ) {
             vector<uint8_t> buf( 4096 );
 
+            forward_list<vector<uint8_t> > bl;
+            bl.push_front( buf );
+
             try {
                 tcsvc_op top;
 
@@ -39,8 +43,10 @@ class tcperf_thread {
 
                 uint64_t skt_key = tcsvc_establish( top,ioctx );
                 udp::socket *udp_skt = reinterpret_cast<udp::socket *>( skt_key );
-                udp_skt->async_send( mutable_buffer( buf.data(),buf.size() ),
-                                     boost::bind( io_op_handler,_1,_2,top ) );
+
+                for( auto&& buf1 : bl )
+                    udp_skt->async_send( mutable_buffer( buf1.data(),buf1.size() ),
+                                         boost::bind( io_op_handler,_1,_2,top ) );
 
                 ioctx.run();
 
@@ -62,7 +68,7 @@ static uint64_t tcsvc_establish( tcsvc_op& top,io_context& ioctx )
 }
 
 static void io_op_handler( boost::system::error_code ec,size_t bytes_done,
-                            tcsvc_op& tcop )
+                           tcsvc_op& tcop )
 {
     lock_guard<mutex> lk( m );
 
